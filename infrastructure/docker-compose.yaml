@@ -1,0 +1,60 @@
+services:
+
+  user-db:
+    image: postgres:16-alpine
+    container_name: comparo-user-db
+    environment:
+      POSTGRES_DB: comparo_users
+      POSTGRES_USER: comparo_admin
+      POSTGRES_PASSWORD: secure_password
+    ports:
+      - "5432:5432"
+    networks:
+      - comparo-network
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: comparo-user-service
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_HOST=user-db
+      - DB_PORT=5432
+      - DB_DBNAME=comparo_users
+      - DB_USERNAME=comparo_admin
+      - DB_PASSWORD=secure_password
+      - KAFKA_BROKERS=kafka:9092
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=comparo
+    depends_on:
+      - user-db
+      - kafka
+      - keycloak
+    networks:
+      - comparo-network
+
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/comparo_users_db
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+
+volumes:
+  user-db-data:
+
+networks:
+  comparo-network:
+    driver: bridge
