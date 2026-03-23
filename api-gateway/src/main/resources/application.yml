@@ -1,0 +1,75 @@
+server:
+  port: ${GATEWAY_PORT:80}
+
+spring:
+  application:
+    name: api-gateway
+  profiles:
+    active: ${SPRING_PROFILE:docker}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${KEYCLOAK_URI:http://localhost:8080/realms/comparo}/protocol/openid-connect/certs
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOrigins: ${FRONTEND_URL:http://localhost:4200}
+                allowedMethods:
+                  - GET
+                  - POST
+                  - PUT
+                  - DELETE
+                  - PATCH
+                  - OPTIONS
+                allowedHeaders: "*"
+                allowCredentials: true
+                maxAge: 3600
+          routes:
+            - id: catalog-service
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8003}
+              predicates:
+                - Path=/api/v1/catalog/**
+
+            - id: user-service
+              uri: ${USER_SERVICE_URL:http://localhost:8001}
+              predicates:
+                - Path=/api/v1/users/**
+
+            - id: search-service
+              uri: ${SEARCH_SERVICE_URL:http://localhost:8005}
+              predicates:
+                - Path=/api/v1/search/**
+
+            - id: offer-service
+              uri: ${OFFER_SERVICE_URL:http://localhost:8011}
+              predicates:
+                - Path=/api/v1/offers/**
+
+            - id: review-service
+              uri: ${REVIEW_SERVICE_URL:http://localhost:8009}
+              predicates:
+                - Path=/api/v1/reviews/**
+
+            - id: admin-service
+              uri: ${ADMIN_SERVICE_URL:http://localhost:8015}
+              predicates:
+                - Path=/api/v1/admin/**
+
+            - id: minio-storage
+              uri: ${MINIO_URL:http://localhost:9000}
+              predicates:
+                - Path=/storage/**
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    com.comparo.gateway: DEBUG

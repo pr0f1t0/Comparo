@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="2" author="comparo-dev" context="dev">
+        <comment>Generate 100 dummy offer records for development environment</comment>
+        <sql>
+            INSERT INTO offers (
+                id, product_id, shop_id, price, currency, url, availability_status, version, created_at, last_updated
+            )
+            SELECT
+                gen_random_uuid(),
+                gen_random_uuid(),
+                gen_random_uuid(),
+                round((random() * 900 + 100)::numeric, 2),
+                'USD',
+                'https://dummy-shop.example.com/item/' || seq,
+                CASE WHEN random() > 0.2 THEN 'IN_STOCK' ELSE 'OUT_OF_STOCK' END,
+                0,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            FROM generate_series(1, 100) AS seq;
+        </sql>
+        <rollback>
+            <sql>TRUNCATE TABLE offers;</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

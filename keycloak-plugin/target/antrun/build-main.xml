@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="maven-antrun-" default="main">
+  <target name="main">
+    <copy file="/home/pr0f1t0/Comparo/comparo/keycloak-plugin/target/keycloak-plugin-0.0.1.jar" todir="/home/pr0f1t0/Comparo/comparo/keycloak-plugin/target/kc-deploy" />
+  </target>
+</project>

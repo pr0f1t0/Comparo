@@ -1,0 +1,369 @@
+services:
+
+  user-db:
+    image: postgres:16-alpine
+    container_name: comparo-user-db
+    environment:
+      POSTGRES_DB: ${USER_DB_NAME:-comparo_users}
+      POSTGRES_USER: ${USER_DB_USER:-comparo_admin}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD:-secure_password}
+    ports:
+      - "5432:5432"
+    networks:
+      - comparo-network
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+
+  offer-db:
+    image: postgres:16-alpine
+    container_name: comparo-offer-db
+    environment:
+      POSTGRES_DB: comparo_offers
+      POSTGRES_USER: comparo_admin
+      POSTGRES_PASSWORD: secure_password
+    ports:
+      - "5433:5432"
+    networks:
+      - comparo-network
+    volumes:
+      - offer-db-data:/var/lib/postgresql/data
+
+  catalog-db:
+    image: mongo:7.0
+    container_name: comparo-catalog-db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: comparo_admin
+      MONGO_INITDB_ROOT_PASSWORD: secure_password
+      MONGO_INITDB_DATABASE: comparo_catalog
+    ports:
+      - "27017:27017"
+    networks:
+      - comparo-network
+    volumes:
+      - catalog-db-data:/data/db
+
+  admin-db:
+    image: postgres:16-alpine
+    container_name: comparo-admin-db
+    environment:
+      POSTGRES_DB: ${ADMIN_DB_NAME:-comparo_admin}
+      POSTGRES_USER: ${ADMIN_DB_USER:-comparo_admin}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD:-secure_password}
+    ports:
+      - "5434:5432"
+    networks:
+      - comparo-network
+    volumes:
+      - admin-db-data:/var/lib/postgresql/data
+
+  review-db:
+    image: postgres:16-alpine
+    container_name: comparo-review-db
+    environment:
+      POSTGRES_DB: ${REVIEW_DB_NAME:-comparo_reviews}
+      POSTGRES_USER: ${REVIEW_DB_USER:-comparo_admin}
+      POSTGRES_PASSWORD: ${REVIEW_DB_PASSWORD:-secure_password}
+    ports:
+      - "5435:5432"
+    networks:
+      - comparo-network
+    volumes:
+      - review-db-data:/var/lib/postgresql/data
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: comparo-api-gateway
+    ports:
+      - "80:80"
+    environment:
+      - SERVER_PORT=80
+      - SPRING_PROFILES_ACTIVE=docker
+      - KEYCLOAK_URI=http://keycloak:8080/realms/comparo
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - USER_SERVICE_URL=http://user-service:8001
+      - CATALOG_SERVICE_URL=http://catalog-service:8003
+      - SEARCH_SERVICE_URL=http://search-service:8005
+      - OFFER_SERVICE_URL=http://offer-service:8011
+      - REVIEW_SERVICE_URL=http://review-service:8009
+      - ADMIN_SERVICE_URL=http://admin-service:8015
+      - MINIO_URL=http://minio:9000
+    depends_on:
+      - redis
+      - keycloak
+    networks:
+      - comparo-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.5
+    container_name: comparo-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    networks:
+      - comparo-network
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: comparo-user-service
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVER_PORT=8001
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://user-db:5432/${USER_DB_NAME:-comparo_users}
+      - SPRING_DATASOURCE_USERNAME=${USER_DB_USER:-comparo_admin}
+      - SPRING_DATASOURCE_PASSWORD=${USER_DB_PASSWORD:-secure_password}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+      - KEYCLOAK_SERVER_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=comparo
+      - KEYCLOAK_ADMIN_CLIENT_ID=admin-cli
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET:-secret}
+    depends_on:
+      - user-db
+      - kafka
+      - keycloak
+    networks:
+      - comparo-network
+
+  offer-service:
+    build:
+      context: ./offer-service
+      dockerfile: Dockerfile
+    container_name: comparo-offer-service
+    ports:
+      - "8011:8011"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    environment:
+      - SERVER_PORT=8011
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://offer-db:5432/comparo_offers
+      - SPRING_DATASOURCE_USERNAME=comparo_admin
+      - SPRING_DATASOURCE_PASSWORD=secure_password
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+      - CATALOG_SERVICE_URL=http://catalog-service:8003
+    depends_on:
+      - offer-db
+      - kafka
+      - keycloak
+      - catalog-service
+    networks:
+      - comparo-network
+
+  catalog-service:
+    build:
+      context: ./catalog-service
+      dockerfile: Dockerfile
+    container_name: comparo-catalog-service
+    ports:
+      - "8003:8003"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    environment:
+      - SERVER_PORT=8003
+      - SPRING_DATA_MONGODB_URI=mongodb://comparo_admin:secure_password@catalog-db:27017/comparo_catalog?authSource=admin
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_DATA_REDIS_DATABASE=1
+      - MINIO_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=comparo_minio
+      - MINIO_SECRET_KEY=secure_minio_password
+      - MINIO_BUCKET_NAME=comparo-products
+    depends_on:
+      - catalog-db
+      - kafka
+      - keycloak
+      - redis
+      - minio
+    networks:
+      - comparo-network
+
+  search-service:
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    container_name: comparo-search-service
+    ports:
+      - "8005:8005"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    environment:
+      - SERVER_PORT=8005
+      - SPRING_ELASTICSEARCH_URIS=http://elasticsearch:9200
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - comparo-network
+
+  admin-service:
+    build:
+      context: ./admin-service
+      dockerfile: Dockerfile
+    container_name: comparo-admin-service
+    ports:
+      - "8015:8015"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    environment:
+      - SERVER_PORT=8015
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://admin-db:5432/${ADMIN_DB_NAME:-comparo_admin}
+      - SPRING_DATASOURCE_USERNAME=${ADMIN_DB_USER:-comparo_admin}
+      - SPRING_DATASOURCE_PASSWORD=${ADMIN_DB_PASSWORD:-secure_password}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KEYCLOAK_SERVER_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=comparo
+      - KEYCLOAK_ADMIN_CLIENT_ID=${ADMIN_KC_CLIENT_ID:-admin-service}
+      - KEYCLOAK_ADMIN_CLIENT_SECRET=${ADMIN_KC_CLIENT_SECRET:-IYik8s0chxmBxrCyRsZDo2itdbaZE6cw}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+      - CATALOG_SERVICE_URL=http://catalog-service:8003
+      - REVIEW_SERVICE_URL=http://review-service:8009
+    depends_on:
+      - admin-db
+      - kafka
+      - keycloak
+      - catalog-service
+      - review-service
+    networks:
+      - comparo-network
+
+  review-service:
+    build:
+      context: ./review-service
+      dockerfile: Dockerfile
+    container_name: comparo-review-service
+    ports:
+      - "8009:8009"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    environment:
+      - SERVER_PORT=8009
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://review-db:5432/${REVIEW_DB_NAME:-comparo_reviews}
+      - SPRING_DATASOURCE_USERNAME=${REVIEW_DB_USER:-comparo_admin}
+      - SPRING_DATASOURCE_PASSWORD=${REVIEW_DB_PASSWORD:-secure_password}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI=http://keycloak:8080/realms/comparo/protocol/openid-connect/certs
+      - APP_KAFKA_TOPICS_PRODUCT_RATINGS=product-ratings
+    depends_on:
+      - review-db
+      - kafka
+      - keycloak
+    networks:
+      - comparo-network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: comparo-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - comparo-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.8
+    container_name: comparo-keycloak
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://user-db:5432/comparo_users
+      KC_DB_USERNAME: comparo_admin
+      KC_DB_PASSWORD: secure_password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: user.registered
+      KAFKA_CLIENT_ID: keycloak-producer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - user-db
+      - kafka
+    networks:
+      - comparo-network
+    volumes:
+      - ./keycloak-plugin/target/kc-deploy:/opt/keycloak/providers:z
+
+  minio:
+    image: minio/minio:RELEASE.2024-03-15T01-07-19Z
+    container_name: comparo-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: comparo_minio
+      MINIO_ROOT_PASSWORD: secure_minio_password
+    command: server /data --console-address ":9001"
+    networks:
+      - comparo-network
+    volumes:
+      - minio-data:/data
+
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: comparo-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - comparo-network
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  
+volumes:
+  user-db-data:
+  offer-db-data:
+  catalog-db-data:
+  kafka-data:
+  elasticsearch-data:
+  admin-db-data:
+  review-db-data:
+  minio-data:
+
+networks:
+  comparo-network:
+    driver: bridge
