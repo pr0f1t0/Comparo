@@ -26,7 +26,7 @@ public class Review {
     @Column(nullable = false)
     private Integer rating;
 
-    @Column(nullable = false)
+    @Column(nullable = false, length = 1000)
     private String comment;
 
     @Enumerated(EnumType.STRING)
